@@ -39,24 +39,30 @@ async function fetchVideoList() {
   }))
 
   const shuffled = shuffleArray(realVideos)
-
-  // 60개 초과 업로드 시: 전체 셔플 후 SESSION_SIZE개 선택 (매 세션마다 다른 조합)
-  // SESSION_SIZE 미만: 실제 영상 모두 + 나머지 자리는 플레이스홀더로 채움
-  if (shuffled.length >= SESSION_SIZE) {
-    return shuffled.slice(0, SESSION_SIZE)
-  }
+  if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
   const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
   return shuffleArray([...shuffled, ...placeholders])
+}
+
+// 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
+function loadSlot(el, url) {
+  if (!el || !url) return
+  if (el.dataset.loadedUrl === url) return  // 이미 로드됨
+  el.dataset.loadedUrl = url
+  el.src = url
+  el.load()
 }
 
 export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
   const [videos, setVideos] = useState([])
   const [videosReady, setVideosReady] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
+  // 'A' 또는 'B' — 현재 재생 중인 슬롯
+  const [activeSlot, setActiveSlot] = useState('A')
+
   const startTimeRef = useRef(null)
   const videoStartTimeRef = useRef(null)
   const [totalSeconds, setTotalSeconds] = useState(0)
-  const videoRefs = useRef({})
   const [log, setLog] = useState({
     videosWatched: 0,
     videoTimes: [],
@@ -72,21 +78,63 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
 
   const isHorizontal = experimentType === 'C' && currentIndex >= 10
 
+  // 더블 버퍼 슬롯 refs — 이 두 개 외에 다른 video 엘리먼트 없음
+  const slotARef = useRef(null)
+  const slotBRef = useRef(null)
+
   const touchStartRef = useRef(null)
   const containerRef = useRef(null)
   const mediaRecorderRef = useRef(null)
   const recordedChunksRef = useRef([])
   const streamRef = useRef(null)
 
+  // 영상 목록 로드 및 초기 슬롯 설정
   useEffect(() => {
     fetchVideoList().then(vids => {
       setVideos(vids)
+      // 슬롯 A: 첫 번째 영상 (재생 예정)
+      loadSlot(slotARef.current, vids[0]?.url)
+      // 슬롯 B: 두 번째 영상 (미리 로드)
+      loadSlot(slotBRef.current, vids[1]?.url)
       setVideosReady(true)
       startTimeRef.current = Date.now()
       videoStartTimeRef.current = Date.now()
     })
   }, [])
 
+  // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
+  useEffect(() => {
+    if (!videosReady || videos.length === 0) return
+
+    const activeEl = activeSlot === 'A' ? slotARef.current : slotBRef.current
+    const standbyEl = activeSlot === 'A' ? slotBRef.current : slotARef.current
+
+    // 대기 슬롯: 확실히 멈추고 다음 영상 미리 로드
+    if (standbyEl) {
+      standbyEl.pause()
+      standbyEl.muted = true
+      loadSlot(standbyEl, videos[currentIndex + 1]?.url)
+    }
+
+    // 현재 슬롯 재생
+    if (activeEl) {
+      activeEl.muted = false
+      const tryPlay = () => activeEl.play().catch(() => {})
+      if (activeEl.readyState >= 2) {
+        tryPlay()
+      } else {
+        const onReady = () => {
+          activeEl.removeEventListener('loadeddata', onReady)
+          activeEl.removeEventListener('canplay', onReady)
+          tryPlay()
+        }
+        activeEl.addEventListener('loadeddata', onReady, { once: true })
+        activeEl.addEventListener('canplay', onReady, { once: true })
+      }
+    }
+  }, [currentIndex, activeSlot, videosReady, videos])
+
+  // 타이머
   useEffect(() => {
     if (!videosReady) return
     const interval = setInterval(() => {
@@ -95,43 +143,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     return () => clearInterval(interval)
   }, [videosReady])
 
-  // 현재 영상 재생, 나머지 일시정지 — DOM 재마운트 없이 제어
-  // 버퍼가 없으면 canplay 이벤트 대기 후 재시도
-  useEffect(() => {
-    if (!videosReady) return
-
-    const cleanups = []
-
-    Object.entries(videoRefs.current).forEach(([idx, el]) => {
-      if (!el) return
-      if (parseInt(idx) === currentIndex) {
-        el.muted = false
-        const tryPlay = () => el.play().catch(() => {})
-        if (el.readyState >= 2) {
-          tryPlay()
-        } else {
-          // loadeddata = 첫 프레임 디코딩 완료 시점, canplay보다 빠름
-          const onReady = () => {
-            el.removeEventListener('loadeddata', onReady)
-            el.removeEventListener('canplay', onReady)
-            tryPlay()
-          }
-          el.addEventListener('loadeddata', onReady, { once: true })
-          el.addEventListener('canplay', onReady, { once: true })
-          cleanups.push(() => {
-            el.removeEventListener('loadeddata', onReady)
-            el.removeEventListener('canplay', onReady)
-          })
-        }
-      } else {
-        el.pause()
-        el.muted = true
-      }
-    })
-
-    return () => cleanups.forEach(fn => fn())
-  }, [currentIndex, videosReady])
-
+  // 화면 녹화
   useEffect(() => {
     startRecording()
     return () => stopRecording()
@@ -190,6 +202,12 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       return
     }
 
+    const advance = () => {
+      setCurrentIndex(i => i + 1)
+      setActiveSlot(s => s === 'A' ? 'B' : 'A')
+      videoStartTimeRef.current = Date.now()
+    }
+
     if (experimentType === 'B' && (currentIndex + 1) % 10 === 0) {
       setShowFriction(true)
       setFrictionProgress(0)
@@ -198,16 +216,14 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
           if (p >= 100) {
             clearInterval(interval)
             setShowFriction(false)
-            setCurrentIndex(i => i + 1)
-            videoStartTimeRef.current = Date.now()
+            advance()
             return 100
           }
           return p + 5
         })
       }, 100)
     } else {
-      setCurrentIndex(i => i + 1)
-      videoStartTimeRef.current = Date.now()
+      advance()
     }
   }, [currentIndex, videos, experimentType])
 
@@ -286,7 +302,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     )
   }
 
-  const current = videos[currentIndex]
+  const currentVideo = videos[currentIndex]
   const isTypeC11th = experimentType === 'C' && currentIndex === 10
 
   return (
@@ -295,7 +311,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       ref={containerRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      style={{ background: current?.color || '#141414' }}
+      style={{ background: currentVideo?.color || '#141414' }}
     >
       {experimentType === 'A' && (
         <div className={styles.awarenessBar}>
@@ -333,48 +349,30 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
-      {/* 슬라이딩 윈도우: 현재 ± 앞뒤 영상을 DOM에 유지, opacity로만 전환 */}
+      {/* 더블 버퍼: 슬롯 A / B */}
       <div className={styles.videoArea}>
-        {videos.map((v, i) => {
-          const inWindow = i >= Math.max(0, currentIndex - 1) && i <= currentIndex + 3
-          if (!inWindow) return null
-          const isActive = i === currentIndex && !showFriction
-          return (
-            <div
-              key={v.id}
-              style={{
-                position: 'absolute', inset: 0,
-                opacity: isActive ? 1 : 0,
-                transition: 'opacity 0.15s',
-                pointerEvents: 'none',
-              }}
-            >
-              {v.url ? (
-                <video
-                  ref={el => { if (el) videoRefs.current[i] = el; else delete videoRefs.current[i] }}
-                  src={v.url}
-                  loop
-                  playsInline
-                  preload="auto"
-                  className={styles.video}
-                />
-              ) : isActive ? (
-                <div className={styles.placeholder}>
-                  <div className={styles.placeholderIcon}>▶</div>
-                  <p className={styles.placeholderText}>영상 {i + 1}</p>
-                  <p className={styles.placeholderSub}>
-                    {isHorizontal ? '← 가로로 스와이프' : '↑ 위로 스와이프'}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          )
-        })}
+        <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'A' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
+          <video ref={slotARef} loop playsInline preload="auto" className={styles.video} />
+        </div>
+        <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'B' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
+          <video ref={slotBRef} loop playsInline preload="auto" className={styles.video} />
+        </div>
+
+        {/* 플레이스홀더 (URL 없는 영상) */}
+        {!showFriction && !currentVideo?.url && (
+          <div className={styles.placeholder}>
+            <div className={styles.placeholderIcon}>▶</div>
+            <p className={styles.placeholderText}>영상 {currentIndex + 1}</p>
+            <p className={styles.placeholderSub}>
+              {isHorizontal ? '← 가로로 스와이프' : '↑ 위로 스와이프'}
+            </p>
+          </div>
+        )}
       </div>
 
       {!showFriction && (
         <div className={styles.videoTitle}>
-          <p>{current?.title}</p>
+          <p>{currentVideo?.title}</p>
           {experimentType !== 'A' && (
             <p className={styles.swipeHint}>
               {isHorizontal ? '← 스와이프하여 다음 영상' : '↑ 스와이프하여 다음 영상'}
