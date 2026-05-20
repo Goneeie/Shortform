@@ -23,28 +23,25 @@ function shuffleArray(arr) {
 }
 
 async function fetchVideoList() {
-  const { data, error } = await supabase.storage.from('videos').list('', {
-    limit: 1000,
-    sortBy: { column: 'name', order: 'asc' },
-  })
+  const { data, error } = await supabase
+    .from('videos')
+    .select('storage_path, title')
+    .eq('active', true)
+    .order('id', { ascending: true })
 
-  if (error || !data) return generatePlaceholders(SESSION_SIZE)
+  if (error || !data || data.length === 0) return generatePlaceholders(SESSION_SIZE)
 
-  const files = data.filter(f => f.name && f.metadata?.size > 0)
-
-  if (files.length === 0) return generatePlaceholders(SESSION_SIZE)
-
-  const realVideos = files.map((file, i) => ({
-    id: file.name,
-    url: supabase.storage.from('videos').getPublicUrl(file.name).data.publicUrl,
-    title: file.name.replace(/\.[^/.]+$/, ''),
+  const realVideos = data.map((row, i) => ({
+    id: row.storage_path,
+    url: supabase.storage.from('videos').getPublicUrl(row.storage_path).data.publicUrl,
+    title: row.title,
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
   const shuffled = shuffleArray(realVideos)
 
-  // 업로드된 영상이 SESSION_SIZE 이상이면 → 셔플 후 SESSION_SIZE개 선택 (60개 초과도 동일)
-  // SESSION_SIZE 미만이면 → 실제 영상 모두 사용 + 나머지는 플레이스홀더로 채움
+  // 60개 초과 업로드 시: 전체 셔플 후 SESSION_SIZE개 선택 (매 세션마다 다른 조합)
+  // SESSION_SIZE 미만: 실제 영상 모두 + 나머지 자리는 플레이스홀더로 채움
   if (shuffled.length >= SESSION_SIZE) {
     return shuffled.slice(0, SESSION_SIZE)
   }
