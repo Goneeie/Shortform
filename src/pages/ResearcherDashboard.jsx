@@ -20,19 +20,28 @@ export default function ResearcherDashboard() {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     fetchSessions()
   }, [])
 
   const fetchSessions = async () => {
-    const { data, error } = await supabase
+  setLoading(true)
+  setError(null)
+  try {
+    const { data, error: sbError } = await supabase
       .from('sessions')
       .select('*')
       .order('created_at', { ascending: false })
-    if (!error) setSessions(data || [])
+    if (sbError) throw new Error(sbError.message)
+    setSessions(data || [])
+  } catch (e) {
+    setError(e.message)
+  } finally {
     setLoading(false)
   }
+}
 
   if (loading) return (
     <div className={styles.loading}>
@@ -40,6 +49,15 @@ export default function ResearcherDashboard() {
       <p>데이터 불러오는 중...</p>
     </div>
   )
+
+  if (error) return (
+  <div className={styles.loading}>
+    <p style={{ color: 'var(--danger)', marginBottom: 12 }}>⚠ 연결 오류: {error}</p>
+    <button onClick={fetchSessions} style={{ padding: '10px 24px', background: 'var(--accent)', color: '#000', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
+      다시 시도
+    </button>
+  </div>
+)
 
   return (
     <div className={styles.container}>
