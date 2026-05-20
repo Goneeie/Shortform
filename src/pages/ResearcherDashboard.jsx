@@ -228,7 +228,32 @@ function SessionDetail({ session: s }) {
         )}
       </Card>
 
-      <Card title="사후 설문">
+      <Card title="사후 설문 — 추정치 vs 실제">
+        <div className={styles.compareGrid}>
+          <div className={styles.compareCol}>
+            <div className={styles.compareHeader}>참가자 추정</div>
+            <div className={styles.compareVal}>{post.estimatedMinutes || '–'}분</div>
+            <div className={styles.compareLabel}>시청 시간</div>
+          </div>
+          <div className={styles.compareDivider}>vs</div>
+          <div className={styles.compareCol}>
+            <div className={styles.compareHeader}>실제</div>
+            <div className={styles.compareVal}>{Math.floor((s.experiment_total_seconds || 0) / 60)}분 {(s.experiment_total_seconds || 0) % 60}초</div>
+            <div className={styles.compareLabel}>시청 시간</div>
+          </div>
+        </div>
+        <div className={styles.compareGrid} style={{ marginTop: 12 }}>
+          <div className={styles.compareCol}>
+            <div className={styles.compareVal}>{post.estimatedVideos || '–'}개</div>
+            <div className={styles.compareLabel}>시청 개수</div>
+          </div>
+          <div className={styles.compareDivider}>vs</div>
+          <div className={styles.compareCol}>
+            <div className={styles.compareVal}>{s.experiment_videos_watched}개</div>
+            <div className={styles.compareLabel}>시청 개수</div>
+          </div>
+        </div>
+        <Row label="종료 고려 여부" value={post.thoughtAboutStopping === 'yes' ? '예 (생각함)' : '아니오'} />
         <Row label="시청 통제감" value={`${post.control}점 / 7점`} />
         <Row label="종료 용이성" value={`${post.easyExit}점 / 7점`} />
       </Card>

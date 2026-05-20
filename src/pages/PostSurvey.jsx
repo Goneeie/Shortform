@@ -13,10 +13,16 @@ const LIKERT_7 = [
 ]
 
 export default function PostSurvey({ sessionData, onComplete }) {
-  const [form, setForm] = useState({ control: '', easyExit: '' })
+  const [form, setForm] = useState({
+    estimatedMinutes: '',
+    estimatedVideos: '',
+    thoughtAboutStopping: '',
+    control: '',
+    easyExit: '',
+  })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
-  const isValid = form.control && form.easyExit
+  const isValid = form.estimatedMinutes && form.estimatedVideos && form.thoughtAboutStopping && form.control && form.easyExit
 
   const handleSubmit = async () => {
     if (!isValid || saving) return
@@ -111,7 +117,51 @@ export default function PostSurvey({ sessionData, onComplete }) {
 
         <section className={styles.section}>
           <div className={styles.field}>
-            <label className={styles.label}>나는 시청을 통제하고 있다고 느꼈다</label>
+            <label className={styles.label}>1. 몇 분 정도 시청했다고 생각하나요?</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                className={styles.input}
+                type="number"
+                min="0"
+                value={form.estimatedMinutes}
+                onChange={e => set('estimatedMinutes', e.target.value)}
+                placeholder="0"
+                style={{ width: 100 }}
+              />
+              <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>분</span>
+            </div>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>2. 몇 개 정도 영상을 본 것 같나요?</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                className={styles.input}
+                type="number"
+                min="0"
+                value={form.estimatedVideos}
+                onChange={e => set('estimatedVideos', e.target.value)}
+                placeholder="0"
+                style={{ width: 100 }}
+              />
+              <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>개</span>
+            </div>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>3. 중간에 종료를 생각한 적이 있었나요?</label>
+            <div className={styles.radioGroup}>
+              {[['예', 'yes'], ['아니오', 'no']].map(([label, val]) => (
+                <label key={val} className={styles.radioItem + (form.thoughtAboutStopping === val ? ' ' + styles.radioSelected : '')}>
+                  <input type="radio" name="postStopping" value={val} checked={form.thoughtAboutStopping === val} onChange={() => set('thoughtAboutStopping', val)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.field}>
+            <label className={styles.label}>4. 나는 시청을 통제하고 있다고 느꼈다</label>
             <div className={styles.likertGroup}>
               {LIKERT_7.map((label, i) => (
                 <label key={i} className={styles.likertItem + (form.control === String(i+1) ? ' ' + styles.likertSelected : '')}>
@@ -124,7 +174,7 @@ export default function PostSurvey({ sessionData, onComplete }) {
           </div>
 
           <div className={styles.field}>
-            <label className={styles.label}>원할 때 쉽게 종료할 수 있었다</label>
+            <label className={styles.label}>5. 원할 때 쉽게 종료할 수 있었다</label>
             <div className={styles.likertGroup}>
               {LIKERT_7.map((label, i) => (
                 <label key={i} className={styles.likertItem + (form.easyExit === String(i+1) ? ' ' + styles.likertSelected : '')}>
