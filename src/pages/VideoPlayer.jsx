@@ -96,19 +96,33 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   }, [videosReady])
 
   // 현재 영상 재생, 나머지 일시정지 — DOM 재마운트 없이 제어
+  // 버퍼가 없으면 canplay 이벤트 대기 후 재시도
   useEffect(() => {
     if (!videosReady) return
+
+    const cleanups = []
+
     Object.entries(videoRefs.current).forEach(([idx, el]) => {
       if (!el) return
       if (parseInt(idx) === currentIndex) {
-        el.currentTime = 0
         el.muted = false
-        el.play().catch(() => {})
+        const tryPlay = () => {
+          el.currentTime = 0
+          el.play().catch(() => {})
+        }
+        if (el.readyState >= 2) {
+          tryPlay()
+        } else {
+          el.addEventListener('canplay', tryPlay, { once: true })
+          cleanups.push(() => el.removeEventListener('canplay', tryPlay))
+        }
       } else {
         el.pause()
         el.muted = true
       }
     })
+
+    return () => cleanups.forEach(fn => fn())
   }, [currentIndex, videosReady])
 
   useEffect(() => {
