@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import styles from './ResearcherDashboard.module.css'
 
@@ -21,59 +21,28 @@ export default function ResearcherDashboard() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
-  const [view, setView] = useState('active') // 'active' | 'deleted'
 
-  const fetchSessions = useCallback(async () => {
+  const fetchSessions = async () => {
     setLoading(true)
     setError(null)
     try {
-      let query = supabase
+      const { data, error: sbError } = await supabase
         .from('sessions')
         .select('*')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false })
-
-      query = view === 'active'
-        ? query.is('deleted_at', null)
-        : query.not('deleted_at', 'is', null)
-
-      const { data, error: sbError } = await query
       if (sbError) throw new Error(sbError.message)
       setSessions(data || [])
-      setSelected(null)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [view])
+  }
 
   useEffect(() => {
     fetchSessions()
-  }, [fetchSessions])
-
-  const handleDelete = async (id, e) => {
-    e.stopPropagation()
-    const { error } = await supabase
-      .from('sessions')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-    if (!error) {
-      setSessions(prev => prev.filter(s => s.id !== id))
-      if (selected?.id === id) setSelected(null)
-    }
-  }
-
-  const handleRestore = async (id, e) => {
-    e.stopPropagation()
-    const { error } = await supabase
-      .from('sessions')
-      .update({ deleted_at: null })
-      .eq('id', id)
-    if (!error) {
-      setSessions(prev => prev.filter(s => s.id !== id))
-      if (selected?.id === id) setSelected(null)
-    }
-  }
+  }, [])
 
   if (loading) return (
     <div className={styles.loading}>
@@ -98,63 +67,31 @@ export default function ResearcherDashboard() {
           <div className={styles.headerLabel}>Researcher View</div>
           <h1 className={styles.headerTitle}>실험 데이터 대시보드</h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', background: 'var(--surface2)', borderRadius: 8, padding: 3, gap: 2 }}>
-            <button
-              onClick={() => setView('active')}
-              style={{
-                padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                background: view === 'active' ? 'var(--accent)' : 'transparent',
-                color: view === 'active' ? '#0a0a0a' : 'var(--text-muted)',
-                border: 'none', transition: 'all 0.15s',
-              }}
-            >
-              활성 데이터
-            </button>
-            <button
-              onClick={() => setView('deleted')}
-              style={{
-                padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                background: view === 'deleted' ? 'var(--danger)' : 'transparent',
-                color: view === 'deleted' ? '#fff' : 'var(--text-muted)',
-                border: 'none', transition: 'all 0.15s',
-              }}
-            >
-              삭제된 데이터
-            </button>
+        <div className={styles.headerStats}>
+          <div className={styles.stat}>
+            <span className={styles.statNum}>{sessions.length}</span>
+            <span className={styles.statLabel}>총 참가자</span>
           </div>
-          <div className={styles.headerStats}>
-            <div className={styles.stat}>
-              <span className={styles.statNum}>{sessions.length}</span>
-              <span className={styles.statLabel}>{view === 'active' ? '총 참가자' : '삭제됨'}</span>
-            </div>
-            {view === 'active' && <>
-              <div className={styles.stat}>
-                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'A').length}</span>
-                <span className={styles.statLabel}>Type A</span>
-              </div>
-              <div className={styles.stat}>
-                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'B').length}</span>
-                <span className={styles.statLabel}>Type B</span>
-              </div>
-              <div className={styles.stat}>
-                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'C').length}</span>
-                <span className={styles.statLabel}>Type C</span>
-              </div>
-            </>}
+          <div className={styles.stat}>
+            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'A').length}</span>
+            <span className={styles.statLabel}>Type A</span>
+          </div>
+          <div className={styles.stat}>
+            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'B').length}</span>
+            <span className={styles.statLabel}>Type B</span>
+          </div>
+          <div className={styles.stat}>
+            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'C').length}</span>
+            <span className={styles.statLabel}>Type C</span>
           </div>
         </div>
       </header>
 
       <div className={styles.layout}>
         <div className={styles.sidebar}>
-          <div className={styles.sidebarTitle}>
-            {view === 'active' ? '참가자 목록' : '삭제된 세션'}
-          </div>
+          <div className={styles.sidebarTitle}>참가자 목록</div>
           {sessions.length === 0 && (
-            <p className={styles.empty}>
-              {view === 'active' ? '아직 데이터가 없습니다.' : '삭제된 데이터가 없습니다.'}
-            </p>
+            <p className={styles.empty}>아직 데이터가 없습니다.</p>
           )}
           {sessions.map(s => (
             <div
@@ -162,34 +99,12 @@ export default function ResearcherDashboard() {
               className={styles.participantCard + (selected?.id === s.id ? ' ' + styles.participantSelected : '')}
               onClick={() => setSelected(s)}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                <div className={styles.pName}>{s.pre_survey?.name || '–'}</div>
-                {view === 'deleted' && (
-                  <button
-                    onClick={(e) => handleRestore(s.id, e)}
-                    title="복원"
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: 'var(--text-muted)', padding: '0 0 0 8px',
-                      fontSize: 13, fontWeight: 700, lineHeight: 1, flexShrink: 0,
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
-                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                  >
-                    ↩ 복원
-                  </button>
-                )}
-              </div>
+              <div className={styles.pName}>{s.pre_survey?.name || '–'}</div>
               <div className={styles.pMeta}>
                 <span className={styles.typeBadge + ' ' + styles[`type${s.experiment_type}`]}>
                   Type {s.experiment_type}
                 </span>
-                <span className={styles.pDate}>
-                  {view === 'deleted'
-                    ? `삭제: ${new Date(s.deleted_at).toLocaleDateString('ko-KR')}`
-                    : new Date(s.created_at).toLocaleDateString('ko-KR')
-                  }
-                </span>
+                <span className={styles.pDate}>{new Date(s.created_at).toLocaleDateString('ko-KR')}</span>
               </div>
             </div>
           ))}
