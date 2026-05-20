@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { supabase } from '../lib/supabase.js'
 import styles from './VideoPlayer.module.css'
 
-// 임시 placeholder 영상 목록 (나중에 실제 Supabase URL로 교체)
-// 각 영상은 { id, url, title } 형태
-const PLACEHOLDER_VIDEOS = Array.from({ length: 60 }, (_, i) => ({
-  id: i + 1,
-  url: '', // 나중에 실제 URL 입력
-  title: `영상 ${i + 1}`,
-  // 색상 기반 placeholder
-  color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
-}))
+const SESSION_SIZE = 30
+
+function generatePlaceholders(count, startIdx = 0) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `ph_${startIdx + i}`,
+    url: '',
+    title: `영상 ${startIdx + i + 1}`,
+    color: `hsl(${((startIdx + i) * 37) % 360}, 40%, 20%)`,
+  }))
+}
 
 function shuffleArray(arr) {
   const a = [...arr]
@@ -20,47 +22,81 @@ function shuffleArray(arr) {
   return a
 }
 
+async function fetchVideoList() {
+  const { data, error } = await supabase.storage.from('videos').list('', {
+    limit: 1000,
+    sortBy: { column: 'name', order: 'asc' },
+  })
+
+  if (error || !data) return generatePlaceholders(SESSION_SIZE)
+
+  const files = data.filter(f => f.name && f.metadata?.size > 0)
+
+  if (files.length === 0) return generatePlaceholders(SESSION_SIZE)
+
+  const realVideos = files.map((file, i) => ({
+    id: file.name,
+    url: supabase.storage.from('videos').getPublicUrl(file.name).data.publicUrl,
+    title: file.name.replace(/\.[^/.]+$/, ''),
+    color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
+  }))
+
+  const shuffled = shuffleArray(realVideos)
+
+  // 업로드된 영상이 SESSION_SIZE 이상이면 → 셔플 후 SESSION_SIZE개 선택 (60개 초과도 동일)
+  // SESSION_SIZE 미만이면 → 실제 영상 모두 사용 + 나머지는 플레이스홀더로 채움
+  if (shuffled.length >= SESSION_SIZE) {
+    return shuffled.slice(0, SESSION_SIZE)
+  }
+  const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
+  return shuffleArray([...shuffled, ...placeholders])
+}
+
 export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
-  const [videos] = useState(() => shuffleArray(PLACEHOLDER_VIDEOS).slice(0, 30))
+  const [videos, setVideos] = useState([])
+  const [videosReady, setVideosReady] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [startTime] = useState(Date.now())
-  const [videoStartTime, setVideoStartTime] = useState(Date.now())
+  const startTimeRef = useRef(null)
+  const videoStartTimeRef = useRef(null)
   const [totalSeconds, setTotalSeconds] = useState(0)
   const [log, setLog] = useState({
     videosWatched: 0,
-    videoTimes: [], // { id, duration }
+    videoTimes: [],
     exitedAt: null,
     exitedOnVideo: null,
-    exitedDuringFriction: false, // Type B용
-    wrongSwipeCount: 0, // Type C용
-    frictionExits: [], // Type B: 대기 중 종료 타이밍
+    exitedDuringFriction: false,
+    wrongSwipeCount: 0,
+    frictionExits: [],
   })
 
-  // Type B: friction state
   const [showFriction, setShowFriction] = useState(false)
   const [frictionProgress, setFrictionProgress] = useState(0)
 
-  // Type C: swap direction after 10th
   const isHorizontal = experimentType === 'C' && currentIndex >= 10
 
-  // Touch handling
   const touchStartRef = useRef(null)
   const containerRef = useRef(null)
-
-  // Screen recording
   const mediaRecorderRef = useRef(null)
   const recordedChunksRef = useRef([])
   const streamRef = useRef(null)
 
-  // Timer
   useEffect(() => {
+    fetchVideoList().then(vids => {
+      setVideos(vids)
+      setVideosReady(true)
+      startTimeRef.current = Date.now()
+      videoStartTimeRef.current = Date.now()
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!videosReady) return
     const interval = setInterval(() => {
-      setTotalSeconds(Math.floor((Date.now() - startTime) / 1000))
+      setTotalSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000))
     }, 1000)
     return () => clearInterval(interval)
-  }, [startTime])
+  }, [videosReady])
 
-  // Start screen recording
   useEffect(() => {
     startRecording()
     return () => stopRecording()
@@ -104,9 +140,8 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     return `${m}분 ${String(s).padStart(2, '0')}초`
   }
 
-  // Navigate to next video
   const goNext = useCallback(() => {
-    const duration = (Date.now() - videoStartTime) / 1000
+    const duration = (Date.now() - videoStartTimeRef.current) / 1000
     const videoId = videos[currentIndex]?.id
 
     setLog(prev => ({
@@ -120,7 +155,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       return
     }
 
-    // Type B: friction every 10 videos
     if (experimentType === 'B' && (currentIndex + 1) % 10 === 0) {
       setShowFriction(true)
       setFrictionProgress(0)
@@ -130,17 +164,17 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
             clearInterval(interval)
             setShowFriction(false)
             setCurrentIndex(i => i + 1)
-            setVideoStartTime(Date.now())
+            videoStartTimeRef.current = Date.now()
             return 100
           }
           return p + 5
         })
-      }, 100) // 2초 동안 (100ms * 20 = 2000ms)
+      }, 100)
     } else {
       setCurrentIndex(i => i + 1)
-      setVideoStartTime(Date.now())
+      videoStartTimeRef.current = Date.now()
     }
-  }, [currentIndex, videoStartTime, videos, experimentType])
+  }, [currentIndex, videos, experimentType])
 
   const handleAutoComplete = () => {
     stopRecording()
@@ -159,7 +193,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const handleExit = () => {
     stopRecording()
     const blob = getRecordingBlob()
-    const now = Date.now()
     onComplete({
       ...log,
       videosWatched: currentIndex + 1,
@@ -175,7 +208,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     })
   }
 
-  // Touch/swipe handling
   const handleTouchStart = (e) => {
     touchStartRef.current = {
       x: e.touches[0].clientX,
@@ -189,15 +221,12 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     const dy = e.changedTouches[0].clientY - touchStartRef.current.y
 
     if (isHorizontal) {
-      // Type C 가로 스와이프
       if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
-        if (dx < 0) goNext() // 왼쪽으로 스와이프 = 다음
+        if (dx < 0) goNext()
       } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 50) {
-        // 세로 스와이프 시도 = 잘못된 방향
         setLog(prev => ({ ...prev, wrongSwipeCount: prev.wrongSwipeCount + 1 }))
       }
     } else {
-      // 세로 스와이프 (위로 = 다음)
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 50) {
         if (dy < 0) goNext()
       }
@@ -205,7 +234,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     touchStartRef.current = null
   }
 
-  // Keyboard support
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') goNext()
@@ -213,6 +241,15 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [goNext])
+
+  if (!videosReady) {
+    return (
+      <div className={styles.videoLoading}>
+        <div className={styles.videoLoadingSpinner} />
+        <p>영상 불러오는 중...</p>
+      </div>
+    )
+  }
 
   const current = videos[currentIndex]
   const isTypeC11th = experimentType === 'C' && currentIndex === 10
@@ -225,7 +262,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       onTouchEnd={handleTouchEnd}
       style={{ background: current?.color || '#141414' }}
     >
-      {/* Type A: 상단 정보 */}
       {experimentType === 'A' && (
         <div className={styles.awarenessBar}>
           <span className={styles.awarenessCount}>현재 <strong>{currentIndex + 1}개째</strong> 시청중</span>
@@ -233,14 +269,12 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
-      {/* Type C 11번째 안내 */}
       {isTypeC11th && (
         <div className={styles.patternBreakNotice}>
           지금부터는 가로방향으로 넘겨서 시청해주세요
         </div>
       )}
 
-      {/* 종료 버튼 - 항상 노출 */}
       <button className={styles.exitBtn} onClick={handleExit}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -250,7 +284,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         시청 종료
       </button>
 
-      {/* Type B: Friction 로딩 */}
       {showFriction && experimentType === 'B' && (
         <div className={styles.frictionOverlay}>
           <div className={styles.frictionContent}>
@@ -265,7 +298,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
-      {/* 영상 영역 */}
       {!showFriction && (
         <div className={styles.videoArea}>
           {current?.url ? (
@@ -289,7 +321,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
-      {/* 영상 제목 */}
       {!showFriction && (
         <div className={styles.videoTitle}>
           <p>{current?.title}</p>
@@ -300,8 +331,6 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
           )}
         </div>
       )}
-
-      {/* 완료 메시지 */}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { supabase } from './lib/supabase.js'
 import Landing from './pages/Landing.jsx'
 import PreSurvey from './pages/PreSurvey.jsx'
 import VideoPlayer from './pages/VideoPlayer.jsx'
@@ -7,7 +8,6 @@ import PostSurvey from './pages/PostSurvey.jsx'
 import Finish from './pages/Finish.jsx'
 import ResearcherDashboard from './pages/ResearcherDashboard.jsx'
 
-// STEP 정의
 const STEPS = {
   LANDING: 'landing',
   PRE_SURVEY: 'pre_survey',
@@ -19,10 +19,27 @@ const STEPS = {
   RESEARCHER: 'researcher',
 }
 
-// 실험군 타입 랜덤 배정
-function assignExperimentType() {
-  const types = ['A', 'B', 'C']
-  return types[Math.floor(Math.random() * types.length)]
+// 삭제되지 않은 세션 기준으로 가장 수가 적은 실험군 타입 배정
+// 동률이면 그 중에서 랜덤
+async function assignExperimentType() {
+  try {
+    const { data } = await supabase
+      .from('sessions')
+      .select('experiment_type')
+      .is('deleted_at', null)
+
+    const counts = { A: 0, B: 0, C: 0 }
+    data?.forEach(s => {
+      if (s.experiment_type in counts) counts[s.experiment_type]++
+    })
+
+    const minCount = Math.min(...Object.values(counts))
+    const candidates = Object.keys(counts).filter(k => counts[k] === minCount)
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  } catch {
+    const types = ['A', 'B', 'C']
+    return types[Math.floor(Math.random() * types.length)]
+  }
 }
 
 export default function App() {
@@ -37,7 +54,6 @@ export default function App() {
     postSurvey: null,
   })
 
-  // URL에 ?researcher 있으면 연구원 대시보드
   if (window.location.search.includes('researcher')) {
     return <ResearcherDashboard />
   }
@@ -55,10 +71,11 @@ export default function App() {
       )}
       {step === STEPS.PRE_SURVEY && (
         <PreSurvey
-          onComplete={(data) => {
+          onComplete={async (data) => {
             updateSession('preSurvey', data)
             updateSession('participantId', data.name + '_' + Date.now())
-            updateSession('experimentType', assignExperimentType())
+            const type = await assignExperimentType()
+            updateSession('experimentType', type)
             goTo(STEPS.CONTROL_VIDEO)
           }}
         />

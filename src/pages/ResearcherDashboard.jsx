@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
 import styles from './ResearcherDashboard.module.css'
 
@@ -21,27 +21,59 @@ export default function ResearcherDashboard() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
+  const [view, setView] = useState('active') // 'active' | 'deleted'
+
+  const fetchSessions = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      let query = supabase
+        .from('sessions')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      query = view === 'active'
+        ? query.is('deleted_at', null)
+        : query.not('deleted_at', 'is', null)
+
+      const { data, error: sbError } = await query
+      if (sbError) throw new Error(sbError.message)
+      setSessions(data || [])
+      setSelected(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [view])
 
   useEffect(() => {
     fetchSessions()
-  }, [])
+  }, [fetchSessions])
 
-  const fetchSessions = async () => {
-  setLoading(true)
-  setError(null)
-  try {
-    const { data, error: sbError } = await supabase
+  const handleDelete = async (id, e) => {
+    e.stopPropagation()
+    const { error } = await supabase
       .from('sessions')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (sbError) throw new Error(sbError.message)
-    setSessions(data || [])
-  } catch (e) {
-    setError(e.message)
-  } finally {
-    setLoading(false)
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+    if (!error) {
+      setSessions(prev => prev.filter(s => s.id !== id))
+      if (selected?.id === id) setSelected(null)
+    }
   }
-}
+
+  const handleRestore = async (id, e) => {
+    e.stopPropagation()
+    const { error } = await supabase
+      .from('sessions')
+      .update({ deleted_at: null })
+      .eq('id', id)
+    if (!error) {
+      setSessions(prev => prev.filter(s => s.id !== id))
+      if (selected?.id === id) setSelected(null)
+    }
+  }
 
   if (loading) return (
     <div className={styles.loading}>
@@ -51,13 +83,13 @@ export default function ResearcherDashboard() {
   )
 
   if (error) return (
-  <div className={styles.loading}>
-    <p style={{ color: 'var(--danger)', marginBottom: 12 }}>⚠ 연결 오류: {error}</p>
-    <button onClick={fetchSessions} style={{ padding: '10px 24px', background: 'var(--accent)', color: '#000', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
-      다시 시도
-    </button>
-  </div>
-)
+    <div className={styles.loading}>
+      <p style={{ color: 'var(--danger)', marginBottom: 12 }}>⚠ 연결 오류: {error}</p>
+      <button onClick={fetchSessions} style={{ padding: '10px 24px', background: 'var(--accent)', color: '#000', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
+        다시 시도
+      </button>
+    </div>
+  )
 
   return (
     <div className={styles.container}>
@@ -66,32 +98,63 @@ export default function ResearcherDashboard() {
           <div className={styles.headerLabel}>Researcher View</div>
           <h1 className={styles.headerTitle}>실험 데이터 대시보드</h1>
         </div>
-        <div className={styles.headerStats}>
-          <div className={styles.stat}>
-            <span className={styles.statNum}>{sessions.length}</span>
-            <span className={styles.statLabel}>총 참가자</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', background: 'var(--surface2)', borderRadius: 8, padding: 3, gap: 2 }}>
+            <button
+              onClick={() => setView('active')}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: view === 'active' ? 'var(--accent)' : 'transparent',
+                color: view === 'active' ? '#0a0a0a' : 'var(--text-muted)',
+                border: 'none', transition: 'all 0.15s',
+              }}
+            >
+              활성 데이터
+            </button>
+            <button
+              onClick={() => setView('deleted')}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: view === 'deleted' ? 'var(--danger)' : 'transparent',
+                color: view === 'deleted' ? '#fff' : 'var(--text-muted)',
+                border: 'none', transition: 'all 0.15s',
+              }}
+            >
+              삭제된 데이터
+            </button>
           </div>
-          <div className={styles.stat}>
-            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'A').length}</span>
-            <span className={styles.statLabel}>Type A</span>
-          </div>
-          <div className={styles.stat}>
-            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'B').length}</span>
-            <span className={styles.statLabel}>Type B</span>
-          </div>
-          <div className={styles.stat}>
-            <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'C').length}</span>
-            <span className={styles.statLabel}>Type C</span>
+          <div className={styles.headerStats}>
+            <div className={styles.stat}>
+              <span className={styles.statNum}>{sessions.length}</span>
+              <span className={styles.statLabel}>{view === 'active' ? '총 참가자' : '삭제됨'}</span>
+            </div>
+            {view === 'active' && <>
+              <div className={styles.stat}>
+                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'A').length}</span>
+                <span className={styles.statLabel}>Type A</span>
+              </div>
+              <div className={styles.stat}>
+                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'B').length}</span>
+                <span className={styles.statLabel}>Type B</span>
+              </div>
+              <div className={styles.stat}>
+                <span className={styles.statNum}>{sessions.filter(s => s.experiment_type === 'C').length}</span>
+                <span className={styles.statLabel}>Type C</span>
+              </div>
+            </>}
           </div>
         </div>
       </header>
 
       <div className={styles.layout}>
-        {/* 참가자 목록 */}
         <div className={styles.sidebar}>
-          <div className={styles.sidebarTitle}>참가자 목록</div>
+          <div className={styles.sidebarTitle}>
+            {view === 'active' ? '참가자 목록' : '삭제된 세션'}
+          </div>
           {sessions.length === 0 && (
-            <p className={styles.empty}>아직 데이터가 없습니다.</p>
+            <p className={styles.empty}>
+              {view === 'active' ? '아직 데이터가 없습니다.' : '삭제된 데이터가 없습니다.'}
+            </p>
           )}
           {sessions.map(s => (
             <div
@@ -99,18 +162,53 @@ export default function ResearcherDashboard() {
               className={styles.participantCard + (selected?.id === s.id ? ' ' + styles.participantSelected : '')}
               onClick={() => setSelected(s)}
             >
-              <div className={styles.pName}>{s.pre_survey?.name || '–'}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div className={styles.pName}>{s.pre_survey?.name || '–'}</div>
+                {view === 'active' ? (
+                  <button
+                    onClick={(e) => handleDelete(s.id, e)}
+                    title="삭제"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-muted)', padding: '0 0 0 8px',
+                      fontSize: 15, lineHeight: 1, flexShrink: 0,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  >
+                    🗑
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => handleRestore(s.id, e)}
+                    title="복원"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-muted)', padding: '0 0 0 8px',
+                      fontSize: 13, fontWeight: 700, lineHeight: 1, flexShrink: 0,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+                  >
+                    ↩ 복원
+                  </button>
+                )}
+              </div>
               <div className={styles.pMeta}>
                 <span className={styles.typeBadge + ' ' + styles[`type${s.experiment_type}`]}>
                   Type {s.experiment_type}
                 </span>
-                <span className={styles.pDate}>{new Date(s.created_at).toLocaleDateString('ko-KR')}</span>
+                <span className={styles.pDate}>
+                  {view === 'deleted'
+                    ? `삭제: ${new Date(s.deleted_at).toLocaleDateString('ko-KR')}`
+                    : new Date(s.created_at).toLocaleDateString('ko-KR')
+                  }
+                </span>
               </div>
             </div>
           ))}
         </div>
 
-        {/* 상세 보기 */}
         <div className={styles.detail}>
           {!selected ? (
             <div className={styles.detailEmpty}>← 참가자를 선택하세요</div>
@@ -130,7 +228,6 @@ function SessionDetail({ session: s }) {
 
   const userTypeLabel = pre.userType === 'Heavy' ? 'Heavy User (2h+)' : 'Light User (<2h)'
 
-  // 추정치 vs 실제 비교
   const actualMins = Math.floor((s.control_total_seconds || 0) / 60)
   const actualSecs = (s.control_total_seconds || 0) % 60
   const estimatedMins = parseInt(mid.estimatedMinutes || 0)
@@ -139,7 +236,6 @@ function SessionDetail({ session: s }) {
     <div className={styles.detailInner}>
       <h2 className={styles.detailTitle}>{pre.name || '–'}</h2>
 
-      {/* 참가자 정보 */}
       <Card title="참가자 정보">
         <Row label="이름/ID" value={pre.name} />
         <Row label="나이" value={`만 ${pre.age}세`} />
@@ -151,7 +247,6 @@ function SessionDetail({ session: s }) {
         <Row label="문항 B (무의식 시청)" value={`${pre.tendencyB}점`} />
       </Card>
 
-      {/* 대조군 로그 */}
       <Card title="대조군 시청 로그">
         <Row label="실제 시청 시간" value={formatSecs(s.control_total_seconds)} highlight />
         <Row label="실제 시청 개수" value={`${s.control_videos_watched}개`} highlight />
@@ -171,7 +266,6 @@ function SessionDetail({ session: s }) {
         )}
       </Card>
 
-      {/* 중간 설문 비교 */}
       <Card title="중간 설문 — 추정치 vs 실제">
         <div className={styles.compareGrid}>
           <div className={styles.compareCol}>
@@ -200,7 +294,6 @@ function SessionDetail({ session: s }) {
         <Row label="종료 고려 여부" value={mid.thoughtAboutStopping === 'yes' ? '예 (생각함)' : '아니오'} />
       </Card>
 
-      {/* 실험군 로그 */}
       <Card title={`실험군 시청 로그 — Type ${s.experiment_type}: ${EXP_LABELS[s.experiment_type]}`}>
         <Row label="실제 시청 시간" value={formatSecs(s.experiment_total_seconds)} highlight />
         <Row label="실제 시청 개수" value={`${s.experiment_videos_watched}개`} highlight />
@@ -210,7 +303,6 @@ function SessionDetail({ session: s }) {
           <Row label="종료 시점" value={formatSecs(s.experiment_exited_at_seconds)} />
           <Row label="종료 시 시청 개수" value={`${s.experiment_exited_on_video}번째 영상 후`} />
         </>}
-        {/* Type B 추가 */}
         {s.experiment_type === 'B' && (
           <Row
             label="대기 화면 중 종료"
@@ -218,7 +310,6 @@ function SessionDetail({ session: s }) {
             highlight
           />
         )}
-        {/* Type C 추가 */}
         {s.experiment_type === 'C' && (
           <Row
             label="세로 스와이프 오시도 횟수"
@@ -236,7 +327,6 @@ function SessionDetail({ session: s }) {
         )}
       </Card>
 
-      {/* 사후 설문 */}
       <Card title="사후 설문">
         <Row label="시청 통제감" value={`${post.control}점 / 7점`} />
         <Row label="종료 용이성" value={`${post.easyExit}점 / 7점`} />
