@@ -56,6 +56,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const startTimeRef = useRef(null)
   const videoStartTimeRef = useRef(null)
   const [totalSeconds, setTotalSeconds] = useState(0)
+  const videoRefs = useRef({})
   const [log, setLog] = useState({
     videosWatched: 0,
     videoTimes: [],
@@ -93,6 +94,22 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     }, 1000)
     return () => clearInterval(interval)
   }, [videosReady])
+
+  // 현재 영상 재생, 나머지 일시정지 — DOM 재마운트 없이 제어
+  useEffect(() => {
+    if (!videosReady) return
+    Object.entries(videoRefs.current).forEach(([idx, el]) => {
+      if (!el) return
+      if (parseInt(idx) === currentIndex) {
+        el.currentTime = 0
+        el.muted = false
+        el.play().catch(() => {})
+      } else {
+        el.pause()
+        el.muted = true
+      }
+    })
+  }, [currentIndex, videosReady])
 
   useEffect(() => {
     startRecording()
@@ -295,42 +312,44 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
-      {/* 다음 영상 2개 미리 로드 */}
-      {videos.slice(currentIndex + 1, currentIndex + 3).map(v =>
-        v?.url ? (
-          <video
-            key={`pre-${v.id}`}
-            src={v.url}
-            preload="auto"
-            muted
-            style={{ display: 'none', position: 'absolute', pointerEvents: 'none' }}
-          />
-        ) : null
-      )}
-
-      {!showFriction && (
-        <div className={styles.videoArea}>
-          {current?.url ? (
-            <video
-              key={current.id}
-              src={current.url}
-              autoPlay
-              loop
-              playsInline
-              preload="auto"
-              className={styles.video}
-            />
-          ) : (
-            <div className={styles.placeholder}>
-              <div className={styles.placeholderIcon}>▶</div>
-              <p className={styles.placeholderText}>영상 {currentIndex + 1}</p>
-              <p className={styles.placeholderSub}>
-                {isHorizontal ? '← 가로로 스와이프' : '↑ 위로 스와이프'}
-              </p>
+      {/* 슬라이딩 윈도우: 현재 ± 앞뒤 영상을 DOM에 유지, opacity로만 전환 */}
+      <div className={styles.videoArea}>
+        {videos.map((v, i) => {
+          const inWindow = i >= Math.max(0, currentIndex - 1) && i <= currentIndex + 3
+          if (!inWindow) return null
+          const isActive = i === currentIndex && !showFriction
+          return (
+            <div
+              key={v.id}
+              style={{
+                position: 'absolute', inset: 0,
+                opacity: isActive ? 1 : 0,
+                transition: 'opacity 0.15s',
+                pointerEvents: 'none',
+              }}
+            >
+              {v.url ? (
+                <video
+                  ref={el => { if (el) videoRefs.current[i] = el; else delete videoRefs.current[i] }}
+                  src={v.url}
+                  loop
+                  playsInline
+                  preload="auto"
+                  className={styles.video}
+                />
+              ) : isActive ? (
+                <div className={styles.placeholder}>
+                  <div className={styles.placeholderIcon}>▶</div>
+                  <p className={styles.placeholderText}>영상 {i + 1}</p>
+                  <p className={styles.placeholderSub}>
+                    {isHorizontal ? '← 가로로 스와이프' : '↑ 위로 스와이프'}
+                  </p>
+                </div>
+              ) : null}
             </div>
-          )}
-        </div>
-      )}
+          )
+        })}
+      </div>
 
       {!showFriction && (
         <div className={styles.videoTitle}>
