@@ -106,15 +106,22 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       if (!el) return
       if (parseInt(idx) === currentIndex) {
         el.muted = false
-        const tryPlay = () => {
-          el.currentTime = 0
-          el.play().catch(() => {})
-        }
+        const tryPlay = () => el.play().catch(() => {})
         if (el.readyState >= 2) {
           tryPlay()
         } else {
-          el.addEventListener('canplay', tryPlay, { once: true })
-          cleanups.push(() => el.removeEventListener('canplay', tryPlay))
+          // loadeddata = 첫 프레임 디코딩 완료 시점, canplay보다 빠름
+          const onReady = () => {
+            el.removeEventListener('loadeddata', onReady)
+            el.removeEventListener('canplay', onReady)
+            tryPlay()
+          }
+          el.addEventListener('loadeddata', onReady, { once: true })
+          el.addEventListener('canplay', onReady, { once: true })
+          cleanups.push(() => {
+            el.removeEventListener('loadeddata', onReady)
+            el.removeEventListener('canplay', onReady)
+          })
         }
       } else {
         el.pause()
