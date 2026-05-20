@@ -295,6 +295,19 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
         </div>
       )}
 
+      {/* 다음 영상 2개 미리 로드 */}
+      {videos.slice(currentIndex + 1, currentIndex + 3).map(v =>
+        v?.url ? (
+          <video
+            key={`pre-${v.id}`}
+            src={v.url}
+            preload="auto"
+            muted
+            style={{ display: 'none', position: 'absolute', pointerEvents: 'none' }}
+          />
+        ) : null
+      )}
+
       {!showFriction && (
         <div className={styles.videoArea}>
           {current?.url ? (
@@ -304,6 +317,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
               autoPlay
               loop
               playsInline
+              preload="auto"
               className={styles.video}
             />
           ) : (

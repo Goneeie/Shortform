@@ -164,21 +164,7 @@ export default function ResearcherDashboard() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                 <div className={styles.pName}>{s.pre_survey?.name || '–'}</div>
-                {view === 'active' ? (
-                  <button
-                    onClick={(e) => handleDelete(s.id, e)}
-                    title="삭제"
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: 'var(--text-muted)', padding: '0 0 0 8px',
-                      fontSize: 15, lineHeight: 1, flexShrink: 0,
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
-                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-                  >
-                    🗑
-                  </button>
-                ) : (
+                {view === 'deleted' && (
                   <button
                     onClick={(e) => handleRestore(s.id, e)}
                     title="복원"
