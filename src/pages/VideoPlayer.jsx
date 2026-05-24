@@ -22,26 +22,42 @@ function shuffleArray(arr) {
   return a
 }
 
-async function fetchVideoList() {
-  const { data, error } = await supabase
-    .from('videos')
-    .select('storage_path, title')
-    .eq('active', true)
-    .order('id', { ascending: true })
+// 최대 maxRetries 번 재시도 — 네트워크 순간 오류 방어
+async function fetchVideoList(maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select('storage_path, title')
+        .eq('active', true)
+        .order('id', { ascending: true })
 
-  if (error || !data || data.length === 0) return generatePlaceholders(SESSION_SIZE)
+      if (error || !data || data.length === 0) {
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+          continue
+        }
+        return null  // 모든 재시도 실패
+      }
 
-  const realVideos = data.map((row, i) => ({
-    id: row.storage_path,
-    url: supabase.storage.from('videos').getPublicUrl(row.storage_path).data.publicUrl,
-    title: row.title,
-    color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
-  }))
+      const realVideos = data.map((row, i) => ({
+        id: row.storage_path,
+        url: supabase.storage.from('videos').getPublicUrl(row.storage_path).data.publicUrl,
+        title: row.title,
+        color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
+      }))
 
-  const shuffled = shuffleArray(realVideos)
-  if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
-  const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
-  return shuffleArray([...shuffled, ...placeholders])
+      const shuffled = shuffleArray(realVideos)
+      if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
+      const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
+      return shuffleArray([...shuffled, ...placeholders])
+    } catch {
+      if (attempt < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+      }
+    }
+  }
+  return null  // 완전 실패
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
@@ -56,6 +72,7 @@ function loadSlot(el, url) {
 export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
   const [videos, setVideos] = useState([])
   const [videosReady, setVideosReady] = useState(false)
+  const [videosError, setVideosError] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   // 'A' 또는 'B' — 현재 재생 중인 슬롯
   const [activeSlot, setActiveSlot] = useState('A')
@@ -88,13 +105,15 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const recordedChunksRef = useRef([])
   const streamRef = useRef(null)
 
-  // 영상 목록 로드 및 초기 슬롯 설정
+  // 영상 목록 로드 및 초기 슬롯 설정 (실패 시 재시도 후 에러 화면)
   useEffect(() => {
     fetchVideoList().then(vids => {
+      if (!vids) {
+        setVideosError(true)
+        return
+      }
       setVideos(vids)
-      // 슬롯 A: 첫 번째 영상 (재생 예정)
       loadSlot(slotARef.current, vids[0]?.url)
-      // 슬롯 B: 두 번째 영상 (미리 로드)
       loadSlot(slotBRef.current, vids[1]?.url)
       setVideosReady(true)
       startTimeRef.current = Date.now()
@@ -292,6 +311,20 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [goNext])
+
+  if (videosError) {
+    return (
+      <div className={styles.videoLoading}>
+        <p style={{ color: '#ff6b6b', marginBottom: 16 }}>영상을 불러오지 못했습니다</p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#fff', color: '#000', fontSize: 15, cursor: 'pointer' }}
+        >
+          다시 시도
+        </button>
+      </div>
+    )
+  }
 
   if (!videosReady) {
     return (
