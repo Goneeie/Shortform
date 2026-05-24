@@ -136,19 +136,20 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     }
 
     // 현재 슬롯 재생
+    // muted=true로 먼저 play() → 모바일 브라우저 autoplay 제한 우회
+    // play() Promise가 resolve된 후 unmute → 소리 정상 출력
     if (activeEl) {
-      activeEl.muted = false
-      const tryPlay = () => activeEl.play().catch(() => {})
+      activeEl.muted = true
+      const tryPlay = () => {
+        activeEl.play()
+          .then(() => { activeEl.muted = false })
+          .catch(() => {})
+      }
       if (activeEl.readyState >= 2) {
         tryPlay()
       } else {
-        const onReady = () => {
-          activeEl.removeEventListener('loadeddata', onReady)
-          activeEl.removeEventListener('canplay', onReady)
-          tryPlay()
-        }
-        activeEl.addEventListener('loadeddata', onReady, { once: true })
-        activeEl.addEventListener('canplay', onReady, { once: true })
+        activeEl.addEventListener('loadeddata', tryPlay, { once: true })
+        activeEl.addEventListener('canplay', tryPlay, { once: true })
       }
     }
   }, [currentIndex, activeSlot, videosReady, videos])
