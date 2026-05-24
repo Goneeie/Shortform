@@ -22,7 +22,9 @@ function shuffleArray(arr) {
   return a
 }
 
-async function fetchVideoList() {
+// mode: 'control' → DB id 순 앞 절반, 'experiment' → 뒤 절반
+// ORDER BY id ASC 로 항상 동일한 순서 보장 → 두 세션 간 영상 겹침 없음
+async function fetchVideoList(mode) {
   const { data, error } = await supabase
     .from('videos')
     .select('storage_path, title')
@@ -38,10 +40,14 @@ async function fetchVideoList() {
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
-  const shuffled = shuffleArray(realVideos)
+  // 절반 분리 후 각각 셔플
+  const half = Math.floor(realVideos.length / 2)
+  const pool = mode === 'control' ? realVideos.slice(0, half) : realVideos.slice(half)
+
+  const shuffled = shuffleArray(pool)
   if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
   const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
-  return shuffleArray([...shuffled, ...placeholders])
+  return [...shuffled, ...placeholders]
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
@@ -89,47 +95,58 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const streamRef = useRef(null)
 
   // 영상 목록 로드 및 초기 슬롯 설정
+  // 슬롯 A에 첫 영상을 muted 재생까지 걸어두어 → videosReady 시점엔 이미 버퍼링 완료
   useEffect(() => {
-    fetchVideoList().then(vids => {
+    fetchVideoList(mode).then(vids => {
       setVideos(vids)
-      // 슬롯 A: 첫 번째 영상 (재생 예정)
-      loadSlot(slotARef.current, vids[0]?.url)
-      // 슬롯 B: 두 번째 영상 (미리 로드)
+
+      // 슬롯 A: 첫 번째 영상 — muted play 즉시 시작 (딜레이 제거)
+      const slotA = slotARef.current
+      if (slotA && vids[0]?.url) {
+        slotA.dataset.loadedUrl = vids[0].url
+        slotA.src = vids[0].url
+        slotA.muted = true
+        slotA.load()
+        slotA.play().catch(() => {})
+      }
+
+      // 슬롯 B: 두 번째 영상 — 로드만 (재생은 playback effect에서)
       loadSlot(slotBRef.current, vids[1]?.url)
+
       setVideosReady(true)
       startTimeRef.current = Date.now()
       videoStartTimeRef.current = Date.now()
     })
   }, [])
 
-  // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
+  // 현재 슬롯 재생 / 대기 슬롯 muted 버퍼링
+  // 핵심: 대기 슬롯도 muted play로 미리 버퍼링 → 스와이프 시 즉각 전환
   useEffect(() => {
     if (!videosReady || videos.length === 0) return
 
     const activeEl = activeSlot === 'A' ? slotARef.current : slotBRef.current
     const standbyEl = activeSlot === 'A' ? slotBRef.current : slotARef.current
 
-    // 대기 슬롯: 확실히 멈추고 다음 영상 미리 로드
+    // 대기 슬롯: 다음 영상 로드 후 muted play로 백그라운드 버퍼링
     if (standbyEl) {
-      standbyEl.pause()
       standbyEl.muted = true
-      loadSlot(standbyEl, videos[currentIndex + 1]?.url)
+      const nextUrl = videos[currentIndex + 1]?.url
+      loadSlot(standbyEl, nextUrl)
+      if (nextUrl) standbyEl.play().catch(() => {})
     }
 
-    // 현재 슬롯 재생
+    // 현재 슬롯: 이미 muted play 중이므로 unmute만 하면 즉각 재생
     if (activeEl) {
       activeEl.muted = false
-      const tryPlay = () => activeEl.play().catch(() => {})
-      if (activeEl.readyState >= 2) {
-        tryPlay()
-      } else {
-        const onReady = () => {
-          activeEl.removeEventListener('loadeddata', onReady)
-          activeEl.removeEventListener('canplay', onReady)
+      if (activeEl.paused) {
+        // 아직 재생 안 된 경우 (네트워크 느림 등) 대비
+        const tryPlay = () => activeEl.play().catch(() => {})
+        if (activeEl.readyState >= 2) {
           tryPlay()
+        } else {
+          activeEl.addEventListener('loadeddata', tryPlay, { once: true })
+          activeEl.addEventListener('canplay', tryPlay, { once: true })
         }
-        activeEl.addEventListener('loadeddata', onReady, { once: true })
-        activeEl.addEventListener('canplay', onReady, { once: true })
       }
     }
   }, [currentIndex, activeSlot, videosReady, videos])
