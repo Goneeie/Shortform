@@ -138,6 +138,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     // 현재 슬롯 재생
     // muted=true로 먼저 play() → 모바일 브라우저 autoplay 제한 우회
     // play() Promise가 resolve된 후 unmute → 소리 정상 출력
+    // canplay(readyState≥3)만 사용 — loadeddata+canplay 둘 다 등록하면 tryPlay가 두 번 호출됨
     if (activeEl) {
       activeEl.muted = true
       const tryPlay = () => {
@@ -145,10 +146,9 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
           .then(() => { activeEl.muted = false })
           .catch(() => {})
       }
-      if (activeEl.readyState >= 2) {
+      if (activeEl.readyState >= 3) {
         tryPlay()
       } else {
-        activeEl.addEventListener('loadeddata', tryPlay, { once: true })
         activeEl.addEventListener('canplay', tryPlay, { once: true })
       }
     }
