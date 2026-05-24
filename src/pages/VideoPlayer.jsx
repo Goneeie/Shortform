@@ -104,47 +104,25 @@ export default function VideoPlayer({ mode, experimentType, participantId, video
     })
   }, [])
 
-  // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
+  // 현재 슬롯 재생 / 대기 슬롯 mute+다음 영상 로드
+  // video 엘리먼트에 autoPlay muted 속성이 있으므로
+  // 브라우저가 데이터 준비되면 알아서 재생 — JS는 어떤 슬롯이 소리낼지만 관리
   useEffect(() => {
     if (!videosReady || videos.length === 0) return
 
     const activeEl = activeSlot === 'A' ? slotARef.current : slotBRef.current
     const standbyEl = activeSlot === 'A' ? slotBRef.current : slotARef.current
 
-    // 대기 슬롯: 확실히 멈추고 다음 영상 미리 로드
+    // 대기 슬롯: 소리 끄고 다음 영상 로드 (autoPlay가 버퍼링·재생 처리)
     if (standbyEl) {
-      standbyEl.pause()
       standbyEl.muted = true
       loadSlot(standbyEl, videos[currentIndex + 1]?.url)
     }
 
-    if (!activeEl) return
-
-    let active = true  // cleanup 후엔 무시
-    let played = false // 중복 play() 방지
-
-    // muted로 시작 → play() 성공 후 unmute
-    // (브라우저 autoplay 정책 우회 + 중복 호출 방지)
-    const doPlay = () => {
-      if (!active || played) return
-      played = true
-      activeEl.muted = true
-      activeEl.play()
-        .then(() => { if (active) activeEl.muted = false })
-        .catch(() => {})
-    }
-
-    if (activeEl.readyState >= 2) {
-      doPlay()
-    } else {
-      activeEl.addEventListener('canplay', doPlay, { once: true })
-      activeEl.addEventListener('loadeddata', doPlay, { once: true })
-    }
-
-    return () => {
-      active = false
-      activeEl.removeEventListener('canplay', doPlay)
-      activeEl.removeEventListener('loadeddata', doPlay)
+    // 현재 슬롯: 소리 켜고 재생 (autoPlay 미발동 시 직접 play())
+    if (activeEl) {
+      activeEl.muted = false
+      activeEl.play().catch(() => {})
     }
   }, [currentIndex, activeSlot, videosReady, videos])
 
@@ -366,10 +344,10 @@ export default function VideoPlayer({ mode, experimentType, participantId, video
       {/* 더블 버퍼: 슬롯 A / B */}
       <div className={styles.videoArea}>
         <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'A' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
-          <video ref={slotARef} loop playsInline preload="auto" className={styles.video} />
+          <video ref={slotARef} loop playsInline autoPlay muted preload="auto" className={styles.video} />
         </div>
         <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'B' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
-          <video ref={slotBRef} loop playsInline preload="auto" className={styles.video} />
+          <video ref={slotBRef} loop playsInline autoPlay muted preload="auto" className={styles.video} />
         </div>
 
         {/* 플레이스홀더 (URL 없는 영상) */}
