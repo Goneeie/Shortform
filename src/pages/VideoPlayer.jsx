@@ -38,10 +38,8 @@ async function fetchVideoList() {
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
-  const shuffled = shuffleArray(realVideos)
-  if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
-  const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
-  return shuffleArray([...shuffled, ...placeholders])
+  // DB에 있는 모든 영상을 셔플해서 반환 — 중복 없음
+  return shuffleArray(realVideos)
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
