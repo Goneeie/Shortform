@@ -88,21 +88,20 @@ export default function VideoPlayer({ mode, experimentType, participantId, video
 
   // 영상 목록 로드 및 초기 슬롯 설정
   // videoList prop이 있으면 fetch 생략, 없으면 직접 fetch (fallback)
+  // 항상 .then()을 통해 실행 — 동기 실행 시 타이밍 문제 방지
   useEffect(() => {
-    const init = (vids) => {
+    const load = (videoList && videoList.length > 0)
+      ? Promise.resolve(videoList)
+      : fetchVideoList()
+
+    load.then(vids => {
       setVideos(vids)
       loadSlot(slotARef.current, vids[0]?.url)
       loadSlot(slotBRef.current, vids[1]?.url)
       setVideosReady(true)
       startTimeRef.current = Date.now()
       videoStartTimeRef.current = Date.now()
-    }
-
-    if (videoList && videoList.length > 0) {
-      init(videoList)
-    } else {
-      fetchVideoList().then(init)
-    }
+    })
   }, [])
 
   // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
@@ -119,21 +118,33 @@ export default function VideoPlayer({ mode, experimentType, participantId, video
       loadSlot(standbyEl, videos[currentIndex + 1]?.url)
     }
 
-    // 현재 슬롯 재생
-    if (activeEl) {
-      activeEl.muted = false
-      const tryPlay = () => activeEl.play().catch(() => {})
-      if (activeEl.readyState >= 2) {
-        tryPlay()
-      } else {
-        const onReady = () => {
-          activeEl.removeEventListener('loadeddata', onReady)
-          activeEl.removeEventListener('canplay', onReady)
-          tryPlay()
-        }
-        activeEl.addEventListener('loadeddata', onReady, { once: true })
-        activeEl.addEventListener('canplay', onReady, { once: true })
-      }
+    if (!activeEl) return
+
+    let active = true  // cleanup 후엔 무시
+    let played = false // 중복 play() 방지
+
+    // muted로 시작 → play() 성공 후 unmute
+    // (브라우저 autoplay 정책 우회 + 중복 호출 방지)
+    const doPlay = () => {
+      if (!active || played) return
+      played = true
+      activeEl.muted = true
+      activeEl.play()
+        .then(() => { if (active) activeEl.muted = false })
+        .catch(() => {})
+    }
+
+    if (activeEl.readyState >= 2) {
+      doPlay()
+    } else {
+      activeEl.addEventListener('canplay', doPlay, { once: true })
+      activeEl.addEventListener('loadeddata', doPlay, { once: true })
+    }
+
+    return () => {
+      active = false
+      activeEl.removeEventListener('canplay', doPlay)
+      activeEl.removeEventListener('loadeddata', doPlay)
     }
   }, [currentIndex, activeSlot, videosReady, videos])
 
