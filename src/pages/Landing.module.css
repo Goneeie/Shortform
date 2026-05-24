@@ -103,11 +103,6 @@
     0 0 20px rgba(232, 255, 71, 0.4);
 }
 
-.noticeIcon {
-  font-size: 16px;
-  flex-shrink: 0;
-  filter: drop-shadow(0 0 6px rgba(232, 255, 71, 0.9));
-}
 
 .notice strong {
   font-weight: 800;
@@ -129,7 +124,7 @@
   border-radius: var(--radius);
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-muted);
+  color: #fff;
 }
 
 .notice .neon {
