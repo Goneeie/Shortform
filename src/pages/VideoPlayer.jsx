@@ -22,9 +22,7 @@ function shuffleArray(arr) {
   return a
 }
 
-// mode: 'control' → DB id 순 앞 절반, 'experiment' → 뒤 절반
-// ORDER BY id ASC는 항상 동일한 순서를 보장 → 두 세션 간 영상 겹침 없음
-async function fetchVideoList(mode) {
+async function fetchVideoList() {
   const { data, error } = await supabase
     .from('videos')
     .select('storage_path, title')
@@ -40,9 +38,10 @@ async function fetchVideoList(mode) {
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
-  const half = Math.floor(realVideos.length / 2)
-  const pool = mode === 'control' ? realVideos.slice(0, half) : realVideos.slice(half)
-  return shuffleArray(pool)
+  const shuffled = shuffleArray(realVideos)
+  if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
+  const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
+  return shuffleArray([...shuffled, ...placeholders])
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
@@ -90,11 +89,12 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const streamRef = useRef(null)
 
   // 영상 목록 로드 및 초기 슬롯 설정
-  // mode 기반으로 직접 fetch — prop 전달 방식의 race condition 제거
   useEffect(() => {
-    fetchVideoList(mode).then(vids => {
+    fetchVideoList().then(vids => {
       setVideos(vids)
+      // 슬롯 A: 첫 번째 영상 (재생 예정)
       loadSlot(slotARef.current, vids[0]?.url)
+      // 슬롯 B: 두 번째 영상 (미리 로드)
       loadSlot(slotBRef.current, vids[1]?.url)
       setVideosReady(true)
       startTimeRef.current = Date.now()
@@ -102,25 +102,35 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     })
   }, [])
 
-  // 현재 슬롯 재생 / 대기 슬롯 mute+다음 영상 로드
-  // video 엘리먼트에 autoPlay muted 속성이 있으므로
-  // 브라우저가 데이터 준비되면 알아서 재생 — JS는 어떤 슬롯이 소리낼지만 관리
+  // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
   useEffect(() => {
     if (!videosReady || videos.length === 0) return
 
     const activeEl = activeSlot === 'A' ? slotARef.current : slotBRef.current
     const standbyEl = activeSlot === 'A' ? slotBRef.current : slotARef.current
 
-    // 대기 슬롯: 소리 끄고 다음 영상 로드 (autoPlay가 버퍼링·재생 처리)
+    // 대기 슬롯: 확실히 멈추고 다음 영상 미리 로드
     if (standbyEl) {
+      standbyEl.pause()
       standbyEl.muted = true
       loadSlot(standbyEl, videos[currentIndex + 1]?.url)
     }
 
-    // 현재 슬롯: 소리 켜고 재생 (autoPlay 미발동 시 직접 play())
+    // 현재 슬롯 재생
     if (activeEl) {
       activeEl.muted = false
-      activeEl.play().catch(() => {})
+      const tryPlay = () => activeEl.play().catch(() => {})
+      if (activeEl.readyState >= 2) {
+        tryPlay()
+      } else {
+        const onReady = () => {
+          activeEl.removeEventListener('loadeddata', onReady)
+          activeEl.removeEventListener('canplay', onReady)
+          tryPlay()
+        }
+        activeEl.addEventListener('loadeddata', onReady, { once: true })
+        activeEl.addEventListener('canplay', onReady, { once: true })
+      }
     }
   }, [currentIndex, activeSlot, videosReady, videos])
 
@@ -342,10 +352,10 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
       {/* 더블 버퍼: 슬롯 A / B */}
       <div className={styles.videoArea}>
         <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'A' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
-          <video ref={slotARef} loop playsInline autoPlay muted preload="auto" className={styles.video} />
+          <video ref={slotARef} loop playsInline preload="auto" className={styles.video} />
         </div>
         <div style={{ position: 'absolute', inset: 0, opacity: activeSlot === 'B' && !showFriction ? 1 : 0, pointerEvents: 'none' }}>
-          <video ref={slotBRef} loop playsInline autoPlay muted preload="auto" className={styles.video} />
+          <video ref={slotBRef} loop playsInline preload="auto" className={styles.video} />
         </div>
 
         {/* 플레이스홀더 (URL 없는 영상) */}
