@@ -136,10 +136,13 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
     }
 
     // 현재 슬롯 재생
+    // NOTE: init effect의 loadSlot은 videosReady=false 상태에서 호출되므로
+    //       <video> 요소가 아직 DOM에 없어 ref가 null → no-op이 됨.
+    //       effect 안에서 다시 loadSlot을 호출해야 실제로 src가 설정됨.
     // muted=true로 먼저 play() → 모바일 브라우저 autoplay 제한 우회
     // play() Promise가 resolve된 후 unmute → 소리 정상 출력
-    // canplay(readyState≥3)만 사용 — loadeddata+canplay 둘 다 등록하면 tryPlay가 두 번 호출됨
     if (activeEl) {
+      loadSlot(activeEl, videos[currentIndex]?.url)   // ← ref 유효한 시점에 src 설정
       activeEl.muted = true
       const tryPlay = () => {
         activeEl.play()
