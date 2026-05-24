@@ -51,7 +51,7 @@ function loadSlot(el, url) {
   el.load()
 }
 
-export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
+export default function VideoPlayer({ mode, experimentType, participantId, videoList, onComplete }) {
   const [videos, setVideos] = useState([])
   const [videosReady, setVideosReady] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -87,17 +87,22 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
   const streamRef = useRef(null)
 
   // 영상 목록 로드 및 초기 슬롯 설정
+  // videoList prop이 있으면 fetch 생략, 없으면 직접 fetch (fallback)
   useEffect(() => {
-    fetchVideoList().then(vids => {
+    const init = (vids) => {
       setVideos(vids)
-      // 슬롯 A: 첫 번째 영상 (재생 예정)
       loadSlot(slotARef.current, vids[0]?.url)
-      // 슬롯 B: 두 번째 영상 (미리 로드)
       loadSlot(slotBRef.current, vids[1]?.url)
       setVideosReady(true)
       startTimeRef.current = Date.now()
       videoStartTimeRef.current = Date.now()
-    })
+    }
+
+    if (videoList && videoList.length > 0) {
+      init(videoList)
+    } else {
+      fetchVideoList().then(init)
+    }
   }, [])
 
   // 현재 슬롯 재생 / 대기 슬롯 mute+pause+다음 영상 로드
