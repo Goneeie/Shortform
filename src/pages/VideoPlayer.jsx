@@ -22,7 +22,9 @@ function shuffleArray(arr) {
   return a
 }
 
-async function fetchVideoList() {
+// mode: 'control' → DB id 순 앞 절반, 'experiment' → 뒤 절반
+// ORDER BY id ASC는 항상 동일한 순서를 보장 → 두 세션 간 영상 겹침 없음
+async function fetchVideoList(mode) {
   const { data, error } = await supabase
     .from('videos')
     .select('storage_path, title')
@@ -38,8 +40,9 @@ async function fetchVideoList() {
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
-  // DB에 있는 모든 영상을 셔플해서 반환 — 중복 없음
-  return shuffleArray(realVideos)
+  const half = Math.floor(realVideos.length / 2)
+  const pool = mode === 'control' ? realVideos.slice(0, half) : realVideos.slice(half)
+  return shuffleArray(pool)
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
@@ -51,7 +54,7 @@ function loadSlot(el, url) {
   el.load()
 }
 
-export default function VideoPlayer({ mode, experimentType, participantId, videoList, onComplete }) {
+export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
   const [videos, setVideos] = useState([])
   const [videosReady, setVideosReady] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -87,14 +90,9 @@ export default function VideoPlayer({ mode, experimentType, participantId, video
   const streamRef = useRef(null)
 
   // 영상 목록 로드 및 초기 슬롯 설정
-  // videoList prop이 있으면 fetch 생략, 없으면 직접 fetch (fallback)
-  // 항상 .then()을 통해 실행 — 동기 실행 시 타이밍 문제 방지
+  // mode 기반으로 직접 fetch — prop 전달 방식의 race condition 제거
   useEffect(() => {
-    const load = (videoList && videoList.length > 0)
-      ? Promise.resolve(videoList)
-      : fetchVideoList()
-
-    load.then(vids => {
+    fetchVideoList(mode).then(vids => {
       setVideos(vids)
       loadSlot(slotARef.current, vids[0]?.url)
       loadSlot(slotBRef.current, vids[1]?.url)

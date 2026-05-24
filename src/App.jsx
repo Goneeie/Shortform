@@ -19,40 +19,6 @@ const STEPS = {
   RESEARCHER: 'researcher',
 }
 
-function shuffleArray(arr) {
-  const a = [...arr]
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]]
-  }
-  return a
-}
-
-// 전체 영상을 한 번에 fetch → 셔플 → 대조군 30 / 실험군 30 분리
-async function fetchAndSplitVideos() {
-  try {
-    const { data, error } = await supabase
-      .from('videos')
-      .select('storage_path, title')
-      .eq('active', true)
-      .order('id', { ascending: true })
-
-    if (error || !data || data.length === 0) return { control: [], experiment: [] }
-
-    const all = shuffleArray(data.map((row, i) => ({
-      id: row.storage_path,
-      url: supabase.storage.from('videos').getPublicUrl(row.storage_path).data.publicUrl,
-      title: row.title,
-      color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
-    })))
-
-    const half = Math.floor(all.length / 2)
-    return { control: all.slice(0, half), experiment: all.slice(half) }
-  } catch {
-    return { control: [], experiment: [] }
-  }
-}
-
 // 삭제되지 않은 세션 기준으로 가장 수가 적은 실험군 타입 배정
 // 동률이면 그 중에서 랜덤
 async function assignExperimentType() {
@@ -82,7 +48,6 @@ export default function App() {
     participantId: null,
     preSurvey: null,
     experimentType: null,
-    videoPool: null,   // { control: [...30개], experiment: [...30개] }
     controlLog: null,
     midSurvey: null,
     experimentLog: null,
@@ -109,12 +74,8 @@ export default function App() {
           onComplete={async (data) => {
             updateSession('preSurvey', data)
             updateSession('participantId', data.name + '_' + Date.now())
-            const [type, pool] = await Promise.all([
-              assignExperimentType(),
-              fetchAndSplitVideos(),
-            ])
+            const type = await assignExperimentType()
             updateSession('experimentType', type)
-            updateSession('videoPool', pool)
             goTo(STEPS.CONTROL_VIDEO)
           }}
         />
@@ -124,7 +85,6 @@ export default function App() {
           mode="control"
           experimentType={null}
           participantId={sessionData.participantId}
-          videoList={sessionData.videoPool?.control}
           onComplete={(log) => {
             updateSession('controlLog', log)
             goTo(STEPS.MID_SURVEY)
@@ -145,7 +105,6 @@ export default function App() {
           mode="experiment"
           experimentType={sessionData.experimentType}
           participantId={sessionData.participantId}
-          videoList={sessionData.videoPool?.experiment}
           onComplete={(log) => {
             updateSession('experimentLog', log)
             goTo(STEPS.POST_SURVEY)
