@@ -28,6 +28,18 @@ export default function Landing({ onStart }) {
             <span>짧은 설문에 응답해주세요</span>
           </div>
         </div>
+        <div className={styles.notice}>
+          <span className={styles.noticeIcon}>⚡</span>
+          <span>
+            숏폼 영상 시청은 총 <strong>두 차례</strong>에 걸쳐 진행됩니다.
+          </span>
+        </div>
+
+        <div className={styles.notice}>
+          <p><span className={styles.neon}>모바일 환경</span>에서 시청해주세요.</p>
+          <p>숏폼 영상 시청은 총 <span className={styles.neon}>두 차례</span>에 걸쳐 진행됩니다.</p>
+        </div>
+
         <button className={styles.startBtn} onClick={onStart}>
           실험 시작하기
           <span className={styles.arrow}>→</span>
