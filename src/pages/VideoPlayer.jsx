@@ -22,9 +22,7 @@ function shuffleArray(arr) {
   return a
 }
 
-// mode: 'control' → DB id 순 앞 절반, 'experiment' → 뒤 절반
-// ORDER BY id ASC로 항상 동일한 순서 보장 → 두 세션 간 영상 겹침 없음
-async function fetchVideoList(mode) {
+async function fetchVideoList() {
   const { data, error } = await supabase
     .from('videos')
     .select('storage_path, title')
@@ -40,14 +38,10 @@ async function fetchVideoList(mode) {
     color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
   }))
 
-  // 절반 분리 후 각각 셔플
-  const half = Math.floor(realVideos.length / 2)
-  const pool = mode === 'control' ? realVideos.slice(0, half) : realVideos.slice(half)
-
-  const shuffled = shuffleArray(pool)
+  const shuffled = shuffleArray(realVideos)
   if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
   const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
-  return [...shuffled, ...placeholders]
+  return shuffleArray([...shuffled, ...placeholders])
 }
 
 // 슬롯에 현재 어떤 영상 인덱스가 할당됐는지 추적
@@ -96,7 +90,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
 
   // 영상 목록 로드 및 초기 슬롯 설정
   useEffect(() => {
-    fetchVideoList(mode).then(vids => {
+    fetchVideoList().then(vids => {
       setVideos(vids)
       // 슬롯 A: 첫 번째 영상 (재생 예정)
       loadSlot(slotARef.current, vids[0]?.url)
