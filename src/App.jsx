@@ -105,6 +105,7 @@ export default function App() {
           mode="experiment"
           experimentType={sessionData.experimentType}
           participantId={sessionData.participantId}
+          excludedIds={sessionData.controlLog?.videoTimes?.map(v => v.id) ?? []}
           onComplete={(log) => {
             updateSession('experimentLog', log)
             goTo(STEPS.POST_SURVEY)

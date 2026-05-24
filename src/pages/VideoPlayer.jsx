@@ -22,8 +22,9 @@ function shuffleArray(arr) {
   return a
 }
 
+// excludedIds: 대조군에서 이미 사용한 영상 ID → 실험군에서 뒤로 밀어 중복 최소화
 // 최대 maxRetries 번 재시도 — 네트워크 순간 오류 방어
-async function fetchVideoList(maxRetries = 3) {
+async function fetchVideoList(excludedIds = [], maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const { data, error } = await supabase
@@ -47,10 +48,15 @@ async function fetchVideoList(maxRetries = 3) {
         color: `hsl(${(i * 37) % 360}, 40%, 20%)`,
       }))
 
-      const shuffled = shuffleArray(realVideos)
-      if (shuffled.length >= SESSION_SIZE) return shuffled.slice(0, SESSION_SIZE)
-      const placeholders = generatePlaceholders(SESSION_SIZE - shuffled.length, shuffled.length)
-      return shuffleArray([...shuffled, ...placeholders])
+      // 미사용 영상 먼저, 이미 사용한 영상은 뒤로 → 중복 최소화
+      const excludedSet = new Set(excludedIds)
+      const primary = shuffleArray(realVideos.filter(v => !excludedSet.has(v.id)))
+      const secondary = shuffleArray(realVideos.filter(v => excludedSet.has(v.id)))
+      const ordered = [...primary, ...secondary]
+
+      if (ordered.length >= SESSION_SIZE) return ordered.slice(0, SESSION_SIZE)
+      const placeholders = generatePlaceholders(SESSION_SIZE - ordered.length, ordered.length)
+      return [...ordered, ...placeholders]
     } catch {
       if (attempt < maxRetries - 1) {
         await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
@@ -69,7 +75,7 @@ function loadSlot(el, url) {
   el.load()
 }
 
-export default function VideoPlayer({ mode, experimentType, participantId, onComplete }) {
+export default function VideoPlayer({ mode, experimentType, participantId, excludedIds = [], onComplete }) {
   const [videos, setVideos] = useState([])
   const [videosReady, setVideosReady] = useState(false)
   const [videosError, setVideosError] = useState(false)
@@ -107,7 +113,7 @@ export default function VideoPlayer({ mode, experimentType, participantId, onCom
 
   // 영상 목록 로드 및 초기 슬롯 설정 (실패 시 재시도 후 에러 화면)
   useEffect(() => {
-    fetchVideoList().then(vids => {
+    fetchVideoList(excludedIds).then(vids => {
       if (!vids) {
         setVideosError(true)
         return
